@@ -3,8 +3,7 @@ from pathlib import Path
 import numpy as np
 import pickle
 import streamlit as st
-from PIL import Image
-from streamlit_drawable_canvas import st_canvas
+from PIL import Image, ImageOps
 
 st.set_page_config(page_title="Digit Recognizer")
 
@@ -20,37 +19,41 @@ model = load_model()
 
 st.title("Digit Recognizer")
 st.write(
-    "A gradient boosting model (trained on 70,000 MNIST handwritten digits) recognizes a digit you draw. "
-    "Draw a single digit (0-9), centered and filling most of the box, then click Predict."
+    "A gradient boosting model (trained on 70,000 MNIST handwritten digits) recognizes a handwritten digit "
+    "(0-9). Write a single digit clearly on paper, or in a paint app, then upload a photo or take one with "
+    "your camera."
 )
 
-canvas = st_canvas(
-    stroke_width=18,
-    stroke_color="#FFFFFF",
-    background_color="#000000",
-    height=280,
-    width=280,
-    drawing_mode="freedraw",
-    key="canvas",
+source = st.radio("Image source", ["Upload a photo", "Use my camera"], horizontal=True)
+file = st.file_uploader("Upload an image", type=["png", "jpg", "jpeg"]) if source == "Upload a photo" else st.camera_input("Take a photo")
+
+invert = st.checkbox(
+    "Dark digit on a light background",
+    value=True,
+    help="Leave this on for pen/pencil on paper. Turn it off if you drew a white digit on a black background.",
 )
 
-if st.button("Predict") and canvas.image_data is not None:
-    img = Image.fromarray(canvas.image_data.astype("uint8")).convert("L").resize((28, 28))
-    pixels = np.array(img, dtype=float).reshape(1, -1) / 255.0
+if file is not None:
+    img = Image.open(file).convert("L")
+    st.image(img, caption="Original", width=150)
 
-    if pixels.max() < 0.05:
-        st.warning("The canvas looks empty. Draw a digit first.")
-    else:
-        proba = model.predict_proba(pixels)[0]
-        pred = int(np.argmax(proba))
-        st.success(f"Predicted digit: **{pred}**  ({proba[pred]:.1%} confidence)")
-        st.bar_chart(proba)
+    small = img.resize((28, 28))
+    if invert:
+        small = ImageOps.invert(small)
+    pixels = np.array(small, dtype=float).reshape(1, -1) / 255.0
 
-if st.button("Clear"):
-    st.rerun()
+    if st.button("Predict"):
+        if pixels.max() < 0.05:
+            st.warning("The image looks empty or the digit is too faint. Try a clearer photo.")
+        else:
+            proba = model.predict_proba(pixels)[0]
+            pred = int(np.argmax(proba))
+            st.success(f"Predicted digit: **{pred}**  ({proba[pred]:.1%} confidence)")
+            st.image(small.resize((140, 140)), caption="What the model sees (28x28)")
+            st.bar_chart(proba)
 
 st.caption(
     "Model: HistGradientBoosting on 28x28 pixel values (validation accuracy ≈ 97.8% on the MNIST dataset). "
-    "Digits drawn off-center, too small, or too thin are harder to recognize, since the model was trained on "
-    "centered, normalized digit images."
+    "The model expects a single centered digit on a plain background, similar to MNIST. Cluttered backgrounds, "
+    "multiple digits, or poor lighting will confuse it."
 )
